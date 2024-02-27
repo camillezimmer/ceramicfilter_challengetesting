@@ -14,7 +14,6 @@ rm(list = ls())
 # Loading libraries ----
 library(ggpubr)
 library(readxl)
-library(esquisse)
 library(onewaytests)
 library(dunn.test)
 library(rstatix)
@@ -25,7 +24,7 @@ library(NADA2)
 library(boot)
 
 # Loading the data into a dataframe ----
-raw_LRV = read_excel("LRV_ceramicfilters.xlsx", col_names = T, skip = 1)
+raw_LRV = read_excel("data/LRV_ceramicfilters.xlsx", col_names = T, skip = 1)
 ```
 
 ```{r Data Wrangling, include=FALSE}
@@ -74,7 +73,8 @@ summ_LRVstats = raw_LRV %>%
             n = n()) %>%
   mutate(L95 = mean-(1.96*sd/sqrt(n))) %>%
   mutate(U95 = mean+(1.96*sd/sqrt(n))) %>% 
-  mutate(label = c("= 7.7 (95% CI 7.6 - 7.8; n = 12)", "= 7.8 (95% CI 7.5 - 8.1; n = 13)"))
+  mutate(label = c("= 7.7 (95% CI 7.6 - 7.8; n = 12)", 
+                   "= 7.8 (95% CI 7.5 - 8.1; n = 13)"))
 summ_LRVstats
 
 ```
@@ -96,7 +96,7 @@ summ_LRV_xbar = summ_LRVstats %>%
 # Maybe go with this for publication since the 1 H vs 24 H has no statistical significance?
 # But neither does end of life so I Don't know maybe don't include that too??? 
 
-plot = ggplot(raw_LRV) +
+LRV_plot = ggplot(raw_LRV) +
   aes(x = organism, y = LRV, fill = organism) +
   geom_boxplot(alpha = 0.5) +
   geom_jitter(colour= "BLACK") +
@@ -120,57 +120,10 @@ plot = ggplot(raw_LRV) +
 
   
 
-plot(plot)
-ggsave("plot.png")
-# UVic Hex code colours:
-# "#C63527" = red
-# "#F5AA1C" = yellow
-# "#005493" = blue
-# "#002754" = official dark blue
-# "#003370" = unofficial dark blue I picked because it looks better on plots
-# "#C63527", "#F5AA1C", "#005493", "#003370"
-
-```
+plot(LRV_plot)
+ggsave("output/LRV_plot.png")
 
 
-```{r ARCHIVE Plots}
-
-#Name panels
-strainID_labs = c("Mutaflor in stationary phase", "K-12 in stationary phase")
-names(strainID_labs) = c("M", "K")
-
-#Generate colours
-colours = c("#C63527","#005493")
-
-# Set display order of the beginning/end of life box plots
-raw_LRV$filter_stage = factor(raw_LRV$filter_stage, levels = c("N","E"))
-
-# Plot only blocking factors (org, half/end)
-# Maybe go with this for publication since the 1 H vs 24 H has no statistical significance?
-# But neither does end of life so I Don't know maybe don't include that too??? 
-
-plot = ggplot(raw_LRV) +
-  aes(x = block_ID, y = LRV, fill = filter_stage) +
-  geom_boxplot(alpha = 0.5) +
-  geom_jitter(colour= "BLACK") +
-  scale_fill_manual(values = colours, breaks = c("N","E"), labels = c("Beginning of life","End of life"), name = "Filter stage")+
-  # scale_fill_brewer(palette="Greys", breaks = c("N","E"), labels = c("Beginning of life","End of life"), name = "Filter stage")+    # Uncommet this line for B+W colour scheme
-  coord_flip() +
-  theme_bw()+
-  facet_wrap(vars(organism), scales = "free_y", ncol = 1, labeller = labeller(organism = strainID_labs)) +
-  scale_y_continuous(name="LRV", breaks=seq(5.5,8.5,0.5)) +
-  # scale_fill_discrete(labels = c("End of filter life", "Beginning of filter life"))
-  # ylim(5.5, 8.5)+
-  theme(axis.ticks.y=element_blank(),
-        axis.text.y=element_blank(),
-        panel.grid.major.y = element_blank(),
-        axis.title.y=element_blank(), 
-        text = element_text(size = 18))+
-  stat_summary(fun = mean, geom = 'point', size=4)
-
-  # geom_text(data = summ_LRVstats, label = summ_LRVstats$label)
-
-plot(plot)
 # UVic Hex code colours:
 # "#C63527" = red
 # "#F5AA1C" = yellow
@@ -184,8 +137,7 @@ plot(plot)
 
 
 
-
-```{r nonparametric regular stats for pub}
+```{r nonparametric stats for pub}
 
 #Alpha = 5% threshold for statistical significance
 
@@ -230,10 +182,9 @@ dunn_test(LRV ~ block_ID, data = raw_LRV)
 
 # By run ID
 #Statistically indistinguishable, all of them
-# YAAAAASSSS (K12 half life included)
 #  p = 0.1556 (K12 half life excluded)
 kruskal.test(LRV ~ run_ID, data = raw_LRV)
-# Post-hoc checking --> no significant differences, yay!!!!
+# Post-hoc checking --> no significant differences
 dunn_test(LRV ~ run_ID, data = raw_LRV)
 
 ```
@@ -246,7 +197,7 @@ control_LRV = raw_LRV %>%
 
 
 ## Investigate if the control LRV was significant
-# Result: the control LRV 95% CI included 0
+# Result: the control LRV 95% CI included 0, therefore not significant
 summary_control_LRV = data.frame()
 mean = mean(control_LRV$control_LRV)
 sd = sd(control_LRV$control_LRV)
@@ -271,28 +222,10 @@ wilcox.test(control_LRV$control_LRV, mu = 0,  alternative = "two.sided") # Resul
 
 ```
 
-```{r Plots archive}
-
-##### Plot all factors ----
-# ggplot(raw_LRV) +
-#   aes(x = run_ID, y = LRV, fill = filter_stage) +
-#   geom_boxplot() +
-#   geom_jitter() +
-#   scale_fill_manual(
-#     values = c(E = "#F8766D",
-#     H = "#00C19F",
-#     N = "#FF61C3")
-#   ) +
-#   coord_flip() +
-#   theme_minimal() +
-#   facet_wrap(vars(organism), scales = "free_y") +
-#   ylim(5, 9)
-
-```
 
 
 
-```{r try  stats using censored value functions}
+```{r ARCHIVE  try  stats using censored value functions}
 str(raw_LRV)
 min(raw_LRV$LRV[raw_LRV$organism == "K12"])
 min(raw_LRV$LRV[raw_LRV$organism == "M"])

@@ -1,6 +1,6 @@
 ---
 title: "filter_diameters"
-output: html_notebook
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -10,20 +10,13 @@ knitr::opts_chunk$set(echo = TRUE)
 rm(list = ls())
 
 # Loading libraries ----
-library(ggpubr)
 library(readxl)
-library(esquisse)
-library(onewaytests)
-library(dunn.test)
 library(rstatix)
 library(forcats)
-library(patchwork)
 library(tidyverse)
-library(NADA2)
-library(boot)
 
 # Loading the data into a dataframe ----
-raw_dia = read_excel("filter_diameter_ceramicfilters.xlsx", col_names = T, skip = 3)
+raw_dia = read_excel("data/filter_diameter_ceramicfilters.xlsx", col_names = T, skip = 3)
 
 ```
 
@@ -47,7 +40,7 @@ summ_dia
 ```{r start_conc}
 
 # Loading data for calculating start concentrations
-raw_misc = read_excel("filter_miscstats.xlsx", col_names = T, skip = 3) 
+raw_misc = read_excel("data/filter_allstats.xlsx", col_names = T, skip = 3) 
 
 
 ## Wrangle data
