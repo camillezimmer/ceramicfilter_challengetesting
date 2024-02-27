@@ -1,0 +1,95 @@
+---
+title: "filter_diameters"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Fresh clean up ----
+rm(list = ls())
+
+# Loading libraries ----
+library(ggpubr)
+library(readxl)
+library(esquisse)
+library(onewaytests)
+library(dunn.test)
+library(rstatix)
+library(forcats)
+library(patchwork)
+library(tidyverse)
+library(NADA2)
+library(boot)
+
+# Loading the data into a dataframe ----
+raw_dia = read_excel("filter_diameter_ceramicfilters.xlsx", col_names = T, skip = 3)
+
+```
+
+```{r summ_diameters}
+
+summ_dia = raw_dia %>%
+  group_by(life_cycle) %>%
+  summarise(
+    n = n(), 
+    sd = sd(avg_dia), ## Units in mm
+    mean = mean(avg_dia), ## Units in mm
+    l95_avg_dia = mean - (1.96*sd/sqrt(n)), 
+    u95_avg_dia = mean + (1.96*sd/sqrt(n))
+  )
+  
+summ_dia
+
+```
+
+
+```{r start_conc}
+
+# Loading data for calculating start concentrations
+raw_misc = read_excel("filter_miscstats.xlsx", col_names = T, skip = 3) 
+
+
+## Wrangle data
+raw_misc = raw_misc %>%
+  filter(cart_num != 4) %>%           # Remove data from cartridge #4 because of suspected short circuiting
+  filter(test_ID != "Mut_End_24H_Cart3") %>%        # Something funny happened here, contamination reported
+  filter(run_type != "F") %>%                       # filter out flush tests (no microbio)
+  filter(run_type != "R") %>%                       # filter out flow rate tests (no microbio)
+  mutate(avg_inf_conc = (inf_conc_A + inf_conc_B + inf_conc_C)/3, .after =  "inf_conc_C") %>% #Avg influent
+  mutate(eff_conc_A = as.numeric(eff_conc_A)) %>%
+  mutate(eff_conc_B = as.numeric(eff_conc_B)) %>%
+  mutate(eff_conc_C = as.numeric(eff_conc_C)) %>%
+  mutate(avg_eff_conc = (eff_conc_A + eff_conc_B + eff_conc_C)/3, .after = "eff_conc_C") %>%  # Avg effluent
+  mutate(avg_control_conc = (control_conc_A + control_conc_B + control_conc_C)/3)
+
+
+## Look to see if there are any statistical differences between start and control concentrations
+# Step 1: test for normality
+shapiro.test(raw_misc$avg_inf_conc) # Influent conc --> Result: non-normal
+shapiro.test(raw_misc$avg_control_conc) # Control conc --> Result: non-normal
+
+# Step 2: Test for differences (paired)
+t.test(raw_misc$avg_inf_conc, raw_misc$avg_control_conc, alternative = "two.sided", paired = TRUE)
+# Result: not statistically different, p = 0.77 (yay!!!) --> OOOO but non, normal, must use parametric stats
+
+# Step 2b: Test for differences using non-parametric statistics (paired)
+wilcox.test(raw_misc$avg_inf_conc, raw_misc$avg_control_conc, paired = TRUE, alternative = "two.sided") 
+# Result: not statistically different, p = 0.80 (yay again!!!)
+
+## Look at start concs only
+summ_start_conc = raw_misc %>%
+  group_by(organism) %>%
+  summarise(
+    n = n(), 
+    mean_inf_conc_allruns = mean(avg_inf_conc),
+    sd_inf_conc_allruns = sd(avg_inf_conc), 
+    l95_inf_conc_allruns = mean_inf_conc_allruns - (1.96*sd_inf_conc_allruns/sqrt(n)), 
+    u95_inf_conc_allruns = mean_inf_conc_allruns + (1.96*sd_inf_conc_allruns/sqrt(n))
+  )
+summ_start_conc
+
+```
+
+
+

@@ -1,0 +1,190 @@
+---
+title: "filter_flowrates"
+author: "Camille Zimmer"
+date: "2023-02-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Fresh clean up ----
+rm(list = ls())
+
+# Loading libraries ----
+library(ggpubr)
+library(readxl)
+library(esquisse)
+library(onewaytests)
+library(dunn.test)
+library(rstatix)
+library(forcats)
+library(patchwork)
+library(tidyverse)
+library(devtools)
+
+# Loading the data into a dataframe ----
+raw_flowrates = read_excel("flowrate_ceramicfilters.xlsx", col_names = T, skip = 1)
+```
+
+```{r Data Wrangling, include=FALSE}
+# Data wrangling ----
+
+# Create new column for run_ID
+raw_flowrates = raw_flowrates %>%
+  mutate(run_ID = paste(raw_flowrates$organism, raw_flowrates$challenge_category, raw_flowrates$filter_stage, sep = "_"), .after = "test_ID")
+
+# Create new column for blocking ANOVA later
+raw_flowrates = raw_flowrates %>%
+  mutate(block_ID = paste(raw_flowrates$organism, raw_flowrates$filter_stage, sep = "_"), .after = "run_ID")
+
+# Make factors
+cols = c("test_ID", "run_ID","block_ID", "organism", "filter_stage", "challenge_category", "cartridge_num", "censored", "group_r")
+raw_flowrates[cols] <- lapply(raw_flowrates[cols], factor)
+
+# Make cen_r into a logical class
+as.logical("cen_r")
+# str(raw_flowrates)
+
+
+# Comment in to exlcude K12 half-life runs (since we didn't do them for Mutaflor)
+# Also comment in to exclude filter #4 from results (suspected short-circuiting)
+# Exclude contaminanted LRV calculation 
+raw_flowrates = raw_flowrates %>%
+  filter(filter_stage != "H") %>%
+  filter(cartridge_num != 4) %>%
+  filter(censored != "Contamination")
+raw_flowrates$LRV = as.numeric(raw_flowrates$LRV)
+str(raw_flowrates)
+
+```
+
+
+```{r summary stats for flow rate}
+
+summ_stats = raw_flowrates %>%
+  drop_na(flow_rate) %>%
+  group_by(group_r) %>%
+  summarise(mean = mean(flow_rate), 
+            sd = sd(flow_rate), 
+            n = n()) %>%
+  mutate(L95 = mean-(1.96*sd/sqrt(n))) %>%
+  mutate(U95 = mean+(1.96*sd/sqrt(n))) 
+
+```
+
+
+```{r Plots}
+# Q: Is LRV correlated to the cumulative # of L filtered? 
+# A: doesn't look like it
+p = ggplot(data = raw_flowrates, aes(x = L_filtered, y = LRV)) +
+  geom_point(shape = "circle", colour = "BLACK") +
+  geom_smooth(method = "lm", se=TRUE, colour = "#C63527")+
+  stat_regline_equation(label.y = 8.75)+
+  stat_cor(label.y = 8.45)+
+  stat_regline_equation(label.y = 8.25, aes(label = ..rr.label..))+
+  annotate(geom="text", x=9.75, y=8, label="n = 25", color="BLACK")+
+  ylim(5,9)+
+  xlab("Total lifetime throughput (L)")+
+  theme_minimal() 
+p
+
+# Is LRV correlated to the flow rate? 
+# A: Maybe? Look at stats?
+p = ggplot(data = raw_flowrates, aes(x = flow_rate, y = LRV)) +
+  geom_point(shape = "circle", size = 2L, colour = "BLACK") +
+  geom_smooth(method = "lm", se=TRUE, colour = "#C63527")+
+  stat_regline_equation(label.y = 8.75)+
+  stat_cor(label.y = 8.45)+
+  stat_regline_equation(label.y = 8.25, aes(label = ..rr.label..))+
+  annotate(geom="text", x=0.18, y=8, label="n = 13", color="BLACK")+
+  ylim(5,9)+
+  xlab("Flow rate (L/hour)")+
+  theme_minimal() 
+p
+
+# Is flow rate correlated to the cumulative # of L filtered? 
+# A: not really????
+p = ggplot(data = raw_flowrates, aes(x = L_filtered, y = flow_rate)) +
+  geom_point(shape = "circle", size = 2L, colour = "BLACK") +
+  geom_smooth(method = "lm", se=TRUE, colour = "#C63527")+
+  stat_regline_equation(label.y = 1)+
+  stat_cor(label.y = 0.9)+
+  stat_regline_equation(label.y = 0.8, aes(label = ..rr.label..))+
+  annotate(geom="text", x=9.75, y=0.7, label="n = 34", color="BLACK")+
+  ylim(0,1)+
+  xlab("Total lifetime throughput (L))")+
+  ylab("Flow rate (L/hour)")+
+  theme_minimal() 
+p
+```
+
+```{r look at correlations}
+
+# How to report: https://www.scribbr.com/statistics/linear-regression-in-r/
+# Getting 95% CI on the slopes  https://stackoverflow.com/questions/15180008/how-to-calculate-the-95-confidence-interval-for-the-slope-in-a-linear-regressio
+# Pearson's rho vs p value https://opexresources.com/interpreting-pearson-coefficient/#:~:text=Here's%20a%20summary%3A,be%20interpreted%20together%2C%20not%20individually.
+# Get pearson's rho because they're interval not ordinal data (https://stats.stackexchange.com/questions/8071/how-to-choose-between-pearson-and-spearman-correlation#:~:text=The%20difference%20between%20the%20Pearson,measurements%20taken%20from%20ordinal%20scales.)
+
+# 1: LRV as a function of L_filtered
+LRV_vs_L_filtered = lm(LRV ~ L_filtered, data = raw_flowrates)
+summ_LRV_vs_L_filtered = summary(LRV_vs_L_filtered)
+summary(LRV_vs_L_filtered)
+
+cor.test(raw_flowrates$LRV, raw_flowrates$L_filtered, method = "pearson")
+par(mfrow=c(2,2))
+plot(LRV_vs_L_filtered)
+par(mfrow=c(1,1))
+coeffs = summ_LRV_vs_L_filtered$coefficients
+# write.csv(coeffs,"coeffs.csv")
+
+# 2: LRV as a function of flow_rate
+LRV_vs_flow_rate = lm(LRV ~ flow_rate, data = raw_flowrates)
+summ_LRV_vs_flow_rate = summary(LRV_vs_flow_rate)
+summary(LRV_vs_flow_rate)
+cor.test(raw_flowrates$LRV, raw_flowrates$flow_rate, method = "pearson")
+par(mfrow=c(2,2))
+plot(LRV_vs_flow_rate)
+par(mfrow=c(1,1))
+coeffs = summ_LRV_vs_flow_rate$coefficients
+# write.csv(coeffs,"coeffs.csv")
+
+# 3:  flow_rate as a function of L_filtered
+flow_rate_vs_L_filtered = lm(flow_rate ~ L_filtered, data = raw_flowrates)
+summ_flow_rate_vs_L_filtered = summary(flow_rate_vs_L_filtered)
+summary(flow_rate_vs_L_filtered)
+cor.test(raw_flowrates$flow_rate, raw_flowrates$L_filtered, method = "pearson")
+par(mfrow=c(2,2))
+plot(flow_rate_vs_L_filtered)
+par(mfrow=c(1,1))
+coeffs = summ_flow_rate_vs_L_filtered$coefficients
+write.csv(coeffs,"coeffs.csv")
+
+
+```
+
+
+
+```{r compare flow rate at beginning and end of life}
+
+# Q: Does the flow rate change from beginning to the end of life? 
+# Step 1: check normality assumption individually
+# Result: New filter flow rate is non-normal; end-of-life filter is normal
+# length(raw_flowrates[raw_flowrates$filter_stage == "E"])
+# length(raw_flowrates[raw_flowrates$filter_stage == "N"])
+shapiro.test(raw_flowrates$flow_rate[raw_flowrates$filter_stage == "E"])
+shapiro.test(raw_flowrates$flow_rate[raw_flowrates$filter_stage == "N"])
+ggdensity(raw_flowrates, x = "flow_rate", facet.by = "filter_stage")
+ggqqplot(raw_flowrates, x = "flow_rate", facet.by = "filter_stage")
+
+# OK so use non-parametric tests
+# Answer: no significant difference
+kruskal.test(flow_rate ~ filter_stage, data = raw_flowrates)
+x = filter(raw_flowrates, filter_stage == "E")
+x = x$flow_rate
+y = filter(raw_flowrates, filter_stage == "N")
+y = y$flow_rate
+wilcox.test(x , y )
+
+
+```

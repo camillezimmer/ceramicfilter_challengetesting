@@ -1,0 +1,366 @@
+---
+title: "filter_LRVs"
+author: "Camille Zimmer"
+date: "2023-02-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Fresh clean up ----
+rm(list = ls())
+
+# Loading libraries ----
+library(ggpubr)
+library(readxl)
+library(esquisse)
+library(onewaytests)
+library(dunn.test)
+library(rstatix)
+library(forcats)
+library(patchwork)
+library(tidyverse)
+library(NADA2)
+library(boot)
+
+# Loading the data into a dataframe ----
+raw_LRV = read_excel("LRV_ceramicfilters.xlsx", col_names = T, skip = 1)
+```
+
+```{r Data Wrangling, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Data wrangling ----
+
+# Create new column for run_ID
+raw_LRV = raw_LRV %>%
+  mutate(run_ID = paste(raw_LRV$organism, raw_LRV$challenge_category, raw_LRV$filter_stage, sep = "_"), .after = "test_ID")
+
+# Create new column for blocking ANOVA later
+raw_LRV = raw_LRV %>%
+  mutate(block_ID = paste(raw_LRV$organism, raw_LRV$filter_stage, sep = "_"), .after = "run_ID")
+
+# Make factors
+cols = c("test_ID", "run_ID","block_ID", "organism", "filter_stage", "challenge_category", "cartridge_num", "censored")
+raw_LRV[cols] <- lapply(raw_LRV[cols], factor)
+
+# Make cen_r into a logical class
+as.logical("cen_r")
+# str(raw_LRV)
+
+
+# Comment in to exlcude K12 half-life runs (since we didn't do them for Mutaflor)
+# Also comment in to exclude filter #4 from results (suspected short-circuiting)
+# Exclude contaminanted LRV calculation 
+raw_LRV = raw_LRV %>%
+  filter(filter_stage != "H") %>%
+  filter(cartridge_num != 4) %>%
+  filter(cen_r != "NA")
+raw_LRV$LRV = as.numeric(raw_LRV$LRV)
+# str(raw_LRV)
+
+
+```
+
+
+
+```{r summary statistics for LRV}
+
+summ_LRVstats = raw_LRV %>%
+  group_by(organism) %>%
+  summarise(mean = mean(LRV), 
+            sd = sd(LRV), 
+            n = n()) %>%
+  mutate(L95 = mean-(1.96*sd/sqrt(n))) %>%
+  mutate(U95 = mean+(1.96*sd/sqrt(n))) %>% 
+  mutate(label = c("= 7.7 (95% CI 7.6 - 7.8; n = 12)", "= 7.8 (95% CI 7.5 - 8.1; n = 13)"))
+summ_LRVstats
+
+```
+
+```{r Plots for publication, fig.width=4.5, fig.height=4}
+
+#Name panels
+strainID_labs = c("EcN in stationary phase", "EcK12 in stationary phase")
+names(strainID_labs) = c("M", "K")
+
+#Generate colours
+colours = c("#C63527","#005493")
+
+#Generate matrix for xbar
+summ_LRV_xbar = summ_LRVstats %>%
+  mutate(label = c("bar(X)", "bar(X)"))
+
+# Plot only blocking factors (org, half/end)
+# Maybe go with this for publication since the 1 H vs 24 H has no statistical significance?
+# But neither does end of life so I Don't know maybe don't include that too??? 
+
+plot = ggplot(raw_LRV) +
+  aes(x = organism, y = LRV, fill = organism) +
+  geom_boxplot(alpha = 0.5) +
+  geom_jitter(colour= "BLACK") +
+  scale_fill_manual(values = colours, breaks = c("M", "K"))+
+  # scale_fill_brewer(palette="Greys", breaks = c("N","E"))+    # Uncommet this line for B+W colour scheme
+  coord_flip() +
+  theme_bw()+
+  facet_wrap(vars(organism), scales = "free_y", ncol = 1, labeller = labeller(organism = strainID_labs)) +
+  scale_y_continuous(name="LRV", breaks=seq(5.5,8.5,0.5)) +
+  # scale_fill_discrete(labels = c("End of filter life", "Beginning of filter life"))
+  # ylim(5.5, 8.5)+
+  theme(axis.ticks.y=element_blank(),
+        axis.text.y=element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.title.y=element_blank(), 
+        legend.position = "none",
+        text = element_text(size = 14))+
+  stat_summary(fun = mean, geom = 'point', size=5, shape = 18, colour = "BLACK")+
+  geom_text(data = summ_LRVstats, aes(x = 0.5, y = 7.125, label = label), size = 3.5, inherit.aes = FALSE, parse = FALSE)+
+  geom_text(data = summ_LRV_xbar, aes(x = 0.5, y = 6.6, label = label), size = 3.5, inherit.aes = FALSE, parse = TRUE)
+
+  
+
+plot(plot)
+ggsave("plot.png")
+# UVic Hex code colours:
+# "#C63527" = red
+# "#F5AA1C" = yellow
+# "#005493" = blue
+# "#002754" = official dark blue
+# "#003370" = unofficial dark blue I picked because it looks better on plots
+# "#C63527", "#F5AA1C", "#005493", "#003370"
+
+```
+
+
+```{r ARCHIVE Plots}
+
+#Name panels
+strainID_labs = c("Mutaflor in stationary phase", "K-12 in stationary phase")
+names(strainID_labs) = c("M", "K")
+
+#Generate colours
+colours = c("#C63527","#005493")
+
+# Set display order of the beginning/end of life box plots
+raw_LRV$filter_stage = factor(raw_LRV$filter_stage, levels = c("N","E"))
+
+# Plot only blocking factors (org, half/end)
+# Maybe go with this for publication since the 1 H vs 24 H has no statistical significance?
+# But neither does end of life so I Don't know maybe don't include that too??? 
+
+plot = ggplot(raw_LRV) +
+  aes(x = block_ID, y = LRV, fill = filter_stage) +
+  geom_boxplot(alpha = 0.5) +
+  geom_jitter(colour= "BLACK") +
+  scale_fill_manual(values = colours, breaks = c("N","E"), labels = c("Beginning of life","End of life"), name = "Filter stage")+
+  # scale_fill_brewer(palette="Greys", breaks = c("N","E"), labels = c("Beginning of life","End of life"), name = "Filter stage")+    # Uncommet this line for B+W colour scheme
+  coord_flip() +
+  theme_bw()+
+  facet_wrap(vars(organism), scales = "free_y", ncol = 1, labeller = labeller(organism = strainID_labs)) +
+  scale_y_continuous(name="LRV", breaks=seq(5.5,8.5,0.5)) +
+  # scale_fill_discrete(labels = c("End of filter life", "Beginning of filter life"))
+  # ylim(5.5, 8.5)+
+  theme(axis.ticks.y=element_blank(),
+        axis.text.y=element_blank(),
+        panel.grid.major.y = element_blank(),
+        axis.title.y=element_blank(), 
+        text = element_text(size = 18))+
+  stat_summary(fun = mean, geom = 'point', size=4)
+
+  # geom_text(data = summ_LRVstats, label = summ_LRVstats$label)
+
+plot(plot)
+# UVic Hex code colours:
+# "#C63527" = red
+# "#F5AA1C" = yellow
+# "#005493" = blue
+# "#002754" = official dark blue
+# "#003370" = unofficial dark blue I picked because it looks better on plots
+# "#C63527", "#F5AA1C", "#005493", "#003370"
+
+```
+
+
+
+
+
+```{r nonparametric regular stats for pub}
+
+#Alpha = 5% threshold for statistical significance
+
+#Shapiro-Wilk normality test and Q-Q plots
+nor.test(LRV ~ organism, data = raw_LRV)
+# Both groups are non-normal; reject the null hypothesis that they're normally distributed
+# Therefore do non-parameteric testing
+
+# Kruskal-Wallis test for non-parametric ANOVA
+#Comparison for K12 vs Mutaflor
+#Result is the same
+kruskal.test(LRV ~ organism, data = raw_LRV)
+#Wilcoxon special case for 2 groups
+# Result is statistically different!!!! --> But only if K12 at half-life is included
+# If we're only looking at the beginning and end of life, no statistical significance (p = 0.05138 for wilcox)
+x = filter(raw_LRV, organism == "M")
+x = x$LRV
+y = filter(raw_LRV, organism == "K")
+y = y$LRV
+wilcox.test(x , y , alternative = "two.sided")
+# Look for effect size
+wilcox_effsize(LRV ~ organism, data = raw_LRV)
+# Cheat a lil bit and look at t test
+t.test(x,y, alternative = "two.sided")
+
+# Q: Does challenge category affect? I.e., first L vs 24 H? 
+# A: Nope, p = 0.4232 (K12 half life included)
+# A: Nope, p = 0.4297 (K12 half life excluded)
+kruskal.test(LRV ~ challenge_category, data = raw_LRV)
+
+# Q: Does filter stage have an effect? I.e., new, half, old? 
+# A: Nope, p = 0.1878 (K12 half life excluded)
+kruskal.test(LRV ~ filter_stage, data = raw_LRV)
+
+# Blocking doesn't work with nonnparametric stats - try dividing up into organism/stage blocks
+# Yes - it's statistically significant (K12 half life included)
+# A: Nope, p = 0.05086 (K12 half life excluded)
+# BUT none of the group-wise comparisons generate statistical differences
+kruskal.test(LRV ~ block_ID, data = raw_LRV)
+dunn_test(LRV ~ block_ID, data = raw_LRV)
+
+
+# By run ID
+#Statistically indistinguishable, all of them
+# YAAAAASSSS (K12 half life included)
+#  p = 0.1556 (K12 half life excluded)
+kruskal.test(LRV ~ run_ID, data = raw_LRV)
+# Post-hoc checking --> no significant differences, yay!!!!
+dunn_test(LRV ~ run_ID, data = raw_LRV)
+
+```
+
+
+```{r look at 24-hour control results}
+
+control_LRV = raw_LRV %>%
+  drop_na(control_LRV)
+
+
+## Investigate if the control LRV was significant
+# Result: the control LRV 95% CI included 0
+summary_control_LRV = data.frame()
+mean = mean(control_LRV$control_LRV)
+sd = sd(control_LRV$control_LRV)
+n = as.numeric(nrow(control_LRV))
+U95 = mean+(1.96*sd/sqrt(n))
+L95 = mean-(1.96*sd/sqrt(n))
+output = c(mean, sd, n, U95, L95)
+summary_control_LRV = rbind(summary_control_LRV, output)
+colnames(summary_control_LRV) = c("mean", "sd", "n", "U95", "L95")
+
+## Do t-test against 0 to double check
+# Step 1: Test for normality
+shapiro.test(control_LRV$control_LRV) # Result: non-normal
+
+# Step 2: Do non-parametric t-test
+# t.test(control_LRV$control_LRV, mu = 0, alternative = "two.sided") # Disregard, this was parametric
+wilcox.test(control_LRV$control_LRV, mu = 0,  alternative = "two.sided") # Result: not different from 0, p-value of 0.50
+
+
+## Look at a statistical comparison between start and end?? --> in other R markdown (filter_diameters)
+
+
+```
+
+```{r Plots archive}
+
+##### Plot all factors ----
+# ggplot(raw_LRV) +
+#   aes(x = run_ID, y = LRV, fill = filter_stage) +
+#   geom_boxplot() +
+#   geom_jitter() +
+#   scale_fill_manual(
+#     values = c(E = "#F8766D",
+#     H = "#00C19F",
+#     N = "#FF61C3")
+#   ) +
+#   coord_flip() +
+#   theme_minimal() +
+#   facet_wrap(vars(organism), scales = "free_y") +
+#   ylim(5, 9)
+
+```
+
+
+
+```{r try  stats using censored value functions}
+str(raw_LRV)
+min(raw_LRV$LRV[raw_LRV$organism == "K12"])
+min(raw_LRV$LRV[raw_LRV$organism == "M"])
+
+# This returns a result of no significant difference but it gives an error for plotting 
+cen2means(x1 = raw_LRV$LRV, x2 = raw_LRV$cen_r, group = raw_LRV$organism)
+
+```
+
+
+
+```{r try censored stats internet examples}
+
+
+data(PbHeron)
+str(PbHeron)
+
+#https://www.quantargo.com/help/r/latest/packages/NADA2/1.0.1/cen2means
+cen2means(PbHeron$Liver,PbHeron$LiverCen,PbHeron$DosageGroup)
+# cen2means(y1, y2, grp, LOG = TRUE, printstat = TRUE)
+
+
+# https://search.r-project.org/CRAN/refmans/NADA2/html/cenanova.html
+cenanova(PbHeron$Liver,PbHeron$LiverCen,PbHeron$DosageGroup,LOG=FALSE)
+
+cenPredInt(PbHeron$Liver,PbHeron$LiverCen)
+cenPredInt(PbHeron$Liver,PbHeron$LiverCen, conf=0.5)
+cenPredInt(PbHeron$Liver,PbHeron$LiverCen,pi.type="upper")
+
+
+```
+
+
+```{r try bootstrapping internaet example}
+
+
+data(mtcars)
+str(mtcars)
+
+# Creating a function to pass into boot() function
+bootFunc <- function(data, i){
+df <- data[i, ]
+c(cor(df[, 2], df[, 3]),
+    median(df[, 2]),
+    mean(df[, 1])
+)
+}
+ 
+b <- boot(mtcars, bootFunc, R = 100)
+ 
+print(b)
+
+# Show all CI values
+boot.ci(b, index = 1)
+
+
+## Another --> This one for mean
+
+data <- data.frame(xs = rnorm(15, 2))
+
+library(boot)
+meanfun <- function(data, i){
+  d <- data[i, ]
+  return(mean(d))   
+}
+bo <- boot(data[, "xs", drop = FALSE], statistic=meanfun, R=5000)
+boot.ci(bo, conf=0.95, type="bca")
+
+```
+
+
